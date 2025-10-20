@@ -23,6 +23,11 @@ const Precedence = enum(u8) {
     exponent,
 };
 
+const Associativity = enum {
+    left,
+    right,
+};
+
 const ParseFn = *const fn (*Compiler) void;
 
 // TODO: add new field for associativity default left
@@ -30,6 +35,7 @@ const ParseRule = struct {
     prefix: ?ParseFn = null,
     infix: ?ParseFn = null,
     precedence: Precedence = .none,
+    associativity: Associativity = .left,
 };
 
 const Compiler = @This();
@@ -54,7 +60,7 @@ const rules = blk: {
     array.set(.forward_slash, .{ .infix = Compiler.binary, .precedence = .factor });
 
     // .exponent
-    array.set(.caret, .{ .infix = Compiler.binary, .precedence = .exponent });
+    array.set(.caret, .{ .infix = Compiler.binary, .precedence = .exponent, .associativity = .right });
 
     break :blk array;
 };
@@ -134,7 +140,25 @@ fn emitValue(self: *Compiler, value: f64) void {
 
 // Expression parsing
 
-fn parsePrecedence(self: *Compiler, precedence: Precedence) void {
+fn assocBool(
+    self: *Compiler,
+    precedence: Precedence,
+    associativity: Associativity,
+) bool {
+    const curr_prec = @intFromEnum(precedence);
+    const next_prec = @intFromEnum(Compiler.rules.get(self.curr_tkn.type).precedence);
+
+    return switch (associativity) {
+        .left => curr_prec < next_prec,
+        .right => curr_prec <= next_prec,
+    };
+}
+
+fn parsePrecedence(
+    self: *Compiler,
+    precedence: Precedence,
+    associativity: Associativity,
+) void {
     self.advance();
 
     const prev_tkn_prefix_rule = Compiler.rules.get(self.prev_tkn.type).prefix;
@@ -146,10 +170,8 @@ fn parsePrecedence(self: *Compiler, precedence: Precedence) void {
         // return;
     }
 
-    // TODO:  <= for right associativity
-    //        < for left associativity
-
-    while (@intFromEnum(precedence) <= @intFromEnum(Compiler.rules.get(self.curr_tkn.type).precedence)) {
+    var assoc_bool = self.assocBool(precedence, associativity);
+    while (assoc_bool) : (assoc_bool = self.assocBool(precedence, associativity)) {
         self.advance();
 
         // NOTE: either make a precedence level for the first expression call or check if token type is .eof
@@ -162,7 +184,7 @@ fn parsePrecedence(self: *Compiler, precedence: Precedence) void {
 }
 
 fn expression(self: *Compiler) void {
-    self.parsePrecedence(.init);
+    self.parsePrecedence(.init, .left);
 }
 
 fn grouping(self: *Compiler) void {
@@ -181,7 +203,7 @@ fn number(self: *Compiler) void {
 fn binary(self: *Compiler) void {
     const operand_type: Token.Type = self.prev_tkn.type;
     const operand_rule: ParseRule = Compiler.rules.get(operand_type);
-    self.parsePrecedence(operand_rule.precedence);
+    self.parsePrecedence(operand_rule.precedence, operand_rule.associativity);
 
     const operand_opcode: OpCode = switch (operand_type) {
         .plus => .add,
@@ -198,7 +220,7 @@ fn binary(self: *Compiler) void {
 fn unary(self: *Compiler) void {
     const op_type: Token.Type = self.prev_tkn.type;
 
-    self.parsePrecedence(.unary);
+    self.parsePrecedence(.unary, .left);
 
     switch (op_type) {
         .dash => self.emitByte(OpCode.byte(.negate)),

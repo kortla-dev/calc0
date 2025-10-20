@@ -24,7 +24,7 @@ pub fn main() !void {
 
     // VM.interpret(&ally, "-1^2*3\x00") catch |err| {
 
-    VM.interpret(&ally, "----1\x00") catch |err| {
+    VM.interpret(&ally, "5-6-7^2^3\x00") catch |err| {
         @panic(@errorName(err));
     };
 }
